@@ -1,3 +1,7 @@
+#ifndef REPO_HEADER_H
+#define REPO_HEADER_H
+//#pragma once
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -15,48 +19,28 @@
 
 #define true 1
 #define false 0
-#ifndef TASK2_REPO_HEADER_H
-#define TASK2_REPO_HEADER_H
 
 #define ADD_CMD 1
 #define REM_CMD 2
 
-#endif //TASK2_REPO_HEADER_H
-
 #define PATHMAX 4096
 #define STRMAX 255
-int COMMAND_CNT=8;
 
-char EXEPATH[PATHMAX];
-char REPOPATH[PATHMAX];
-char COMMITPATH[PATHMAX];
-char STAGPATH[PATHMAX];
-char FILEPATH[PATHMAX];
-char inputBuf[PATHMAX*4];
-char BUF[PATHMAX];
+extern int COMMAND_CNT;
 
-char *COMMAND_SET[] = {
-    "add",
-    "remove",
-    "status",
-    "commit",
-    "revert",
-    "log",
-    "help",
-    "exit",
-};
+extern char EXEPATH[PATHMAX];
+extern char REPOPATH[PATHMAX];
+extern char COMMITPATH[PATHMAX];
+extern char STAGPATH[PATHMAX];
+extern char FILEPATH[PATHMAX];
+extern char inputBuf[PATHMAX*4];
+extern char BUF[PATHMAX];
 
-struct stagNode{
-    char realpath[PATHMAX];
-    struct stagNode *next;
-    struct stagNode *prev;
-};
+extern char *COMMAND_SET[];
 
-struct stagList{
-    struct stagNode *head;
-    struct stagNode *tail;
-};
-struct stagList *staglist;
+struct stagNode;
+struct stagList;
+extern struct stagList *staglist;
 
 void Get_Path();
 
@@ -74,3 +58,6 @@ struct stagNode* Find_Node(char *path);
 int Insert_Node(char *path);
 int Insert_Recur(char *path);
 int Remove_Node(char *path);
+int Remove_Recur(char *path);
+
+#endif //TASK2_REPO_HEADER_H

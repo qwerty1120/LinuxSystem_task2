@@ -7,7 +7,7 @@ int main(int argc, char *argv[]){
 
     if(argc<2){
         printf("ERROR : <PATH> is not include\n");
-        printf("Usage : add <PATH> record path to staging area, path will track modification.\n");
+        printf("Usage : remove <PATH> record path to staging area, path will track modification.\n");
         exit(1);
     }
     if(strlen(argv[1])>PATHMAX){
@@ -19,8 +19,8 @@ int main(int argc, char *argv[]){
         fprintf(stderr, "ERROR : %s is wrong path.\n", argv[1]);
         exit(1);
     }
-    if(!Insert_Recur(FILEPATH)){
-        printf("%s is already exist in staging area.\n", FILEPATH);
+    if(!Remove_Recur(FILEPATH)){
+        printf("%s is already removed from staging area.\n", FILEPATH);
         exit(1);
     }
     int fd;
@@ -30,7 +30,7 @@ int main(int argc, char *argv[]){
         exit(1);
     }
 
-    snprintf(BUF, strlen(FILEPATH)+8, "add \"%s\"\n", FILEPATH);
+    snprintf(BUF, strlen(FILEPATH)+11, "remove \"%s\"\n", FILEPATH);
 
     if(write(fd, BUF, strlen(BUF)) < 0){
         fprintf(stderr, "write error for %s\n", STAGPATH);

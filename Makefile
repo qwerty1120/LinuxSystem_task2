@@ -7,7 +7,10 @@ EXECUTABLES = add commit remove log revert status help repo
 
 all: $(EXECUTABLES)
 
-$(EXECUTABLES): %: %.c repo_header.h
+repo_header.o : repo_header.c repo_header.h
+	$(CC) -c repo_header.c $(OPTIONS)
+
+$(EXECUTABLES): %: %.c repo_header.o
 	$(CC) -o $@ $^ $(OPTIONS)
 
 clean:
