@@ -261,3 +261,23 @@ void Stag_Setting(){
         }
     }
 }
+
+int Check_Status(struct Node *start, int command){
+    int ret = 0;
+    struct Node *curr = start;
+
+    if(curr->mode != command){
+        return 1;
+    }
+    if(curr->isdir == true){
+        curr = curr->child;
+        while(curr->prev != NULL){
+            ret += Check_Status(curr, command);
+            curr = curr->prev;
+        }
+    }
+    else {
+        return 0;
+    }
+    return ret;
+}

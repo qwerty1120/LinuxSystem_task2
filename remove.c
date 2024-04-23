@@ -27,7 +27,7 @@ int main(int argc, char *argv[]){
     }
 
     struct Node * check = Find_Node(FILEPATH, Q->head);
-    if(check->mode == REM_CMD){
+    if(Check_Status(check, REM_CMD) == 0){
         printf("\".%s\" is already removed in staging area.\n", FILEPATH+strlen(EXEPATH));
         exit(1);
     }

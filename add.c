@@ -27,8 +27,7 @@ int main(int argc, char *argv[]){
     }
 
     struct Node * check = Find_Node(FILEPATH, Q->head);
-    if(check->mode == ADD_CMD){
-
+    if(Check_Status(check, ADD_CMD) == 0){
         printf("\".%s\" is already exist in staging area.\n", FILEPATH+strlen(EXEPATH));
         exit(1);
     }

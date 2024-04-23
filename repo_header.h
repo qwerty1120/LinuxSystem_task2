@@ -64,13 +64,13 @@ void Get_Path();
 
 void List_Init();
 
-void Stag_Listing();
+void Stag_Setting();
 
 //read staging log function
 char Read_One (int fd);
 int Read_Delim(int fd, char *buf, char delim);
-int Read_Line(int fd, char *buf);
 
+int Read_Line(int fd, char *buf);
 //linked list atomic function
 struct Node * Find_Node(char *path, struct Node* start);
 void Insert_Node(struct Node* curr, char *path);
@@ -78,6 +78,6 @@ void Insert_Recur(struct Node *curr, char *path);
 void List_Setting();
 int Cmd_File_Switch(int command, struct Node *start);
 int Cmd_Recur_Switch(int command, struct Node *start);
-void Stag_Setting();
+int Check_Status(struct Node *start, int command);
 
 #endif //REPO_HEADER_H
