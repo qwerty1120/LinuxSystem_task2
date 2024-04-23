@@ -20,12 +20,14 @@
 #define true 1
 #define false 0
 
+#define UNTRACKTED 0
 #define ADD_CMD 1
 #define REM_CMD 2
 
 #define PATHMAX 4096
 #define STRMAX 255
 
+typedef char bool;
 extern int COMMAND_CNT;
 
 extern char EXEPATH[PATHMAX];
@@ -38,13 +40,29 @@ extern char BUF[PATHMAX];
 
 extern char *COMMAND_SET[];
 
-struct stagNode;
-struct stagList;
-extern struct stagList *staglist;
+//struct Node;
+//struct List;
+
+struct Node{
+    int mode;
+    int status;//status가 true 이면 mode 와 상관없이 child를 볼 필요가 있다. dir가 remove 된 후 안의 파일이 add 된 경우 status가 true가 된다.
+    bool isdir;
+    char realpath[PATHMAX];
+    struct Node *next;
+    struct Node *prev;
+    struct Node *child;
+    struct Node *parent;
+};
+
+struct List{
+    struct Node *head;
+    struct Node *tail;
+};
+extern struct List *Q;
 
 void Get_Path();
 
-void stagList_Init();
+void List_Init();
 
 void Stag_Listing();
 
@@ -54,10 +72,12 @@ int Read_Delim(int fd, char *buf, char delim);
 int Read_Line(int fd, char *buf);
 
 //linked list atomic function
-struct stagNode* Find_Node(char *path);
-int Insert_Node(char *path);
-int Insert_Recur(char *path);
-int Remove_Node(char *path);
-int Remove_Recur(char *path);
+struct Node * Find_Node(char *path, struct Node* start);
+void Insert_Node(struct Node* curr, char *path);
+void Insert_Recur(struct Node *curr, char *path);
+void List_Setting();
+int Cmd_File_Switch(int command, struct Node *start);
+int Cmd_Recur_Switch(int command, struct Node *start);
+void Stag_Setting();
 
-#endif //TASK2_REPO_HEADER_H
+#endif //REPO_HEADER_H

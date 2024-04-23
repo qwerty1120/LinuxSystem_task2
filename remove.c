@@ -2,8 +2,7 @@
 
 int main(int argc, char *argv[]){
     Get_Path();
-    stagList_Init();
-    Stag_Listing();
+    Stag_Setting();
 
     if(argc<2){
         printf("ERROR : <PATH> is not include\n");
@@ -19,8 +18,17 @@ int main(int argc, char *argv[]){
         fprintf(stderr, "ERROR : %s is wrong path.\n", argv[1]);
         exit(1);
     }
-    if(!Remove_Recur(FILEPATH)){
-        printf("%s is already removed from staging area.\n", FILEPATH);
+
+    if (strncmp(FILEPATH, EXEPATH, strlen(EXEPATH))
+        || !strncmp(FILEPATH, REPOPATH, strlen(REPOPATH))
+        || !strcmp(FILEPATH, EXEPATH))  {// 사용자 디렉토리 내부의 경로인지 확인
+        fprintf(stderr, "ERROR: path must be in user directory\n - \'%s\' is not in user directory.\n", FILEPATH);
+        exit(1);
+    }
+
+    struct Node * check = Find_Node(FILEPATH, Q->head);
+    if(check->mode == REM_CMD){
+        printf("\".%s\" is already removed in staging area.\n", FILEPATH+strlen(EXEPATH));
         exit(1);
     }
     int fd;
@@ -37,6 +45,6 @@ int main(int argc, char *argv[]){
         exit(1);
     }
 
-    printf("%s", BUF);
+    printf("remove \".%s\"\n", FILEPATH+strlen(EXEPATH));
     exit(0);
 }

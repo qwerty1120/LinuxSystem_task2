@@ -1,5 +1,16 @@
 #include "repo_header.h"
 
+#define true 1
+#define false 0
+
+#define UNTRACKED 0
+#define ADD_CMD 1
+#define REM_CMD 2
+
+#define PATHMAX 4096
+#define STRMAX 255
+
+typedef char bool;
 int COMMAND_CNT=8;
 
 char EXEPATH[PATHMAX];
@@ -20,31 +31,24 @@ char *COMMAND_SET[] = {
         "help",
         "exit",
 };
+//
+//struct Node{
+//    int mode;
+//    int status;//status가 true 이면 mode 와 상관없이 child를 볼 필요가 있다. dir가 remove 된 후 안의 파일이 add 된 경우 status가 true가 된다.
+//    bool isdir;
+//    char realpath[PATHMAX];
+//    struct Node *next;
+//    struct Node *prev;
+//    struct Node *child;
+//    struct Node *parent;
+//};
+//
+//struct List{
+//    struct Node *head;
+//    struct Node *tail;
+//};
 
-struct stagNode{
-    char realpath[PATHMAX];
-    struct stagNode *next;
-    struct stagNode *prev;
-};
-
-struct stagList{
-    struct stagNode *head;
-    struct stagNode *tail;
-};
-
-struct stagList *staglist;
-
-//staglist 초기화 세팅
-void stagList_Init(){
-    staglist = (struct stagList*)malloc(sizeof(struct stagList));
-    staglist->head = (struct stagNode*)malloc(sizeof(struct stagNode));
-    staglist->tail = (struct stagNode*)malloc(sizeof(struct stagNode));
-    staglist->tail->next = NULL;
-    staglist->head->prev = NULL;
-    staglist->head->next = staglist->tail;
-    staglist->tail->prev = staglist->head;
-}
-
+struct List *Q;
 //필요한 repo path들 가져오기
 void Get_Path(){
     getcwd(EXEPATH,PATHMAX);
@@ -54,22 +58,6 @@ void Get_Path(){
     snprintf(COMMITPATH, strlen(REPOPATH)+13, "%s/.commit.log", REPOPATH);
     snprintf(STAGPATH, strlen(REPOPATH)+14, "%s/.staging.log", REPOPATH);
 }
-
-/*
-
-add, remove기준
-
-노드 삽입 (char * str) => void  1/1/1
-노드 탐색 (char * str) => node* 1/1/2/1
-노드 삭제 (char * str) => void 1/1/2
-
-fscanf(f, "%s%*c%s%*c", buf1, buf2);
-
-특정 구분자가 있을 때 까지 읽기(구분자까지 읽는거)(int fd, char*buf, char delim) => void 1/2/1/1
-파일 한줄읽기(이어서 읽기, 오프셋은 내부의 read로만 변경한다고 가정) (int fd, char *buf) => int 1/2/1
-링크드 리스트 구성(int fd, node * head) => void 1
-
-*/
 
 //특정 구분자가 있을 때 까지 읽기
 int Read_Delim(int fd, char *buf, char delim){
@@ -96,7 +84,6 @@ char Read_One (int fd){
 int Read_Line(int fd, char *buf){
     int ret = -1;
     int check;
-
     if((check = Read_Delim(fd, buf, ' ')) == 0) {
         return 0;
     }
@@ -117,37 +104,41 @@ int Read_Line(int fd, char *buf){
 
     return ret;
 }
-
-//리스트에 이미 노드가 있는지 탐색
-struct stagNode* Find_Node(char *path){
-    struct stagNode *curr = staglist->head->next;
-    while(curr->next!=NULL){
-        if(!strcmp(curr->realpath, path)){
-            return curr;
-        }
-        curr=curr->next;
-    }
-    return NULL;//없는걸 삭제하려고함
+//list 초기화 세팅
+void List_Init(){
+    Q = (struct List*)malloc(sizeof(struct List));
+    Q->head = (struct Node*)malloc(sizeof(struct Node));
+    Q->tail = (struct Node*)malloc(sizeof(struct Node));
+    Q->head->child = (struct Node*)malloc(sizeof(struct Node));
+    Q->head->parent = (struct Node*)malloc(sizeof(struct Node));
+    Q->tail->next = NULL;
+    Q->head->prev = NULL;
+    Q->head->child = NULL;
+    Q->head->parent = NULL;
+    Q->head->next = Q->tail;
+    Q->tail->prev = Q->head;
+    strcpy(Q->head->realpath, EXEPATH);
+    Q->head->isdir = true;
 }
 
-//노드 삽입, 이미 있으면 리턴 -1
-int Insert_Node(char *path){
-    if(Find_Node(path)!=NULL){
-        return -1;
-    }
-
-    struct stagNode *new = (struct stagNode*)malloc(sizeof(struct stagNode));
+void Insert_Node(struct Node *curr, char *path){
+    struct Node * new = (struct Node *)malloc(sizeof(struct Node));
     strcpy(new->realpath, path);
 
-    new->prev= staglist->tail->prev;
-    staglist->tail->prev->next = new;
-    staglist->tail->prev=new;
-    new->next = staglist->tail;
-    return 0;
+    if(curr->child != NULL){
+        new->parent = curr;
+        curr->child->next = new;
+        new->prev = curr->child;
+        curr->child = new;
+    }
+    else {
+        curr->child = new;
+        new->parent = curr;
+    }
 }
 
-int Insert_Recur(char *path){
-    int cnt=0, ret = 0;
+void Insert_Recur(struct Node *curr, char *path){
+    int cnt;
     struct stat stbuf;
     struct dirent **namelist;
     char buf[PATHMAX];
@@ -157,7 +148,8 @@ int Insert_Recur(char *path){
         exit(1);
     }
     if(S_ISDIR(stbuf.st_mode)) {
-        ret+=Insert_Node(path)+1;
+        Insert_Node(curr, path);
+        curr->child->isdir=true;
 
         if ((cnt = scandir(path, &namelist, NULL, alphasort)) == -1) {
             fprintf(stderr, "ERROR : scandir error for %s\n", path);
@@ -167,81 +159,105 @@ int Insert_Recur(char *path){
             if (!strcmp(namelist[i]->d_name, ".") || !strcmp(namelist[i]->d_name, ".."))
                 continue;
             sprintf(buf, "%s/%s", path, namelist[i]->d_name);
-            ret += Insert_Recur(buf);
+            Insert_Recur(curr->child, buf);
         }
     }
     else if(S_ISREG(stbuf.st_mode)) {
-        ret = Insert_Node(path) + 1;
+        Insert_Node(curr, path);
+        curr->child->isdir = false;
     }
-    return ret;
 }
 
-//노드 제거, 없는 노드일 경우 리턴 -1
-int Remove_Node(char *path){
-    struct stagNode *rem = Find_Node(path);
-    if(rem == NULL){
-        return -1;
-    }
-    rem->prev->next=rem->next;
-    rem->next->prev=rem->prev;
-    free(rem);
-    return 0;
-}
-
-int Remove_Recur(char *path){
-    int cnt=0, ret = 0;
-    struct stat stbuf;
+void List_Setting(){
+    int cnt;
     struct dirent **namelist;
-    char buf[PATHMAX];
+    char buf[PATHMAX*2];
 
-    if(lstat(path, &stbuf) < 0) {
-        fprintf(stderr, "lstat error for %s\n", path);
+    List_Init();
+
+    if ((cnt = scandir(EXEPATH, &namelist, NULL, alphasort)) == -1) {
+        fprintf(stderr, "ERROR : scandir error for %s\n", EXEPATH);
         exit(1);
     }
-    if(S_ISDIR(stbuf.st_mode)) {
-        ret += Remove_Recur(path) + 1;
-        if ((cnt = scandir(path, &namelist, NULL, alphasort)) == -1) {
-            fprintf(stderr, "ERROR : scandir error for %s\n", path);
-            exit(1);
+    for (int i = 0; i < cnt; i++) {
+        if (!strcmp(namelist[i]->d_name, ".") || !strcmp(namelist[i]->d_name, ".."))
+            continue;
+        sprintf(buf, "%s/%s", EXEPATH, namelist[i]->d_name);
+        Insert_Recur(Q->head, buf);
+    }
+}
+
+struct Node * Find_Node(char *path, struct Node* start){
+    struct Node * curr = start;
+    while(1){
+        if(strcmp(path, curr->realpath) && !strncmp(path, curr->realpath, strlen(curr->realpath))){
+            curr=curr->child;
         }
-        for (int i = 0; i < cnt; i++) {
-            if (!strcmp(namelist[i]->d_name, ".") || !strcmp(namelist[i]->d_name, ".."))
-                continue;
-            sprintf(buf, "%s/%s", path, namelist[i]->d_name);
-            ret += Remove_Recur(buf);
+        else if(strncmp(path, curr->realpath, strlen(curr->realpath))){
+            if(curr->prev != NULL){
+                curr = curr->prev;
+            }
+            else {
+                printf("listing error\n");
+                exit(1);
+            }
+        }
+        else if(!strcmp(path, curr->realpath)){
+            return curr;
         }
     }
-    else if(S_ISREG(stbuf.st_mode)) {
-        ret = Remove_Node(path) + 1;
+}
+int Cmd_File_Switch(int command, struct Node *start){
+    struct Node * curr = start;
+    if(curr->mode == command){
+        return 0;
+    }
+    curr->mode = command;
+
+    if(command == ADD_CMD){
+        while(curr->prev != NULL) {
+            curr->status = true;
+            curr = curr->parent;
+        }
+    }
+    else if(command == REM_CMD){
+        curr->mode = REM_CMD;
+        curr->status = false;
+    }
+    return 1;
+}
+int Cmd_Recur_Switch(int command, struct Node *start){
+    struct Node * curr = start;
+    int ret;//ret이 최종적으로 0이면 cmd가 변경된 게 없다는 뜻 그러면 already...
+
+    ret = Cmd_File_Switch(command, curr);
+
+    if(curr->isdir == true){
+        curr=curr->child;
+        while(curr != NULL){
+            if(curr->isdir == true) ret += Cmd_Recur_Switch(command, curr);
+            else ret += Cmd_File_Switch(command, curr);
+            if(curr->prev != NULL) curr = curr->prev;
+            else break;
+        }
     }
     return ret;
 }
-
-void Stag_Listing(){
+void Stag_Setting(){
     int fd;
     int command;
-    struct stat stbuf;
+
+    List_Setting();
 
     if((fd=open(STAGPATH, O_RDONLY)) < 0){
         fprintf(stderr, "open error for %s\n", STAGPATH);
         exit(1);
     }
+
     while((command = Read_Line(fd, BUF)) > 0){
-        switch (command){
-            case ADD_CMD :
-                if(!Insert_Recur(BUF)){
-                    fprintf(stderr, "staging insert duplication error\n");
-                    exit(1);
-                }
-                break;
-            case REM_CMD :
-                if(Remove_Recur(BUF) < 0){
-                    fprintf(stderr, "staging remove duplication error\n");
-                    exit(1);
-                }
-                break;
-            default:
-                exit(1);
+        if(Cmd_Recur_Switch(command, Find_Node(BUF, Q->head)) < 0){
+            printf("staging log error\n");
+            exit(1);
         }
     }
 }
