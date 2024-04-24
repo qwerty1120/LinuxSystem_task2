@@ -10,8 +10,8 @@ int main(int argc, char *argv[]){
         printf("Usage : add <NAME> backup staging area with commit name.\n");
         exit(1);
     }
-    if(strlen(argv[1])>PATHMAX){
-        fprintf(stderr, "Input path must not exceed 4,096 bytes.\n");
+    if(strlen(argv[1])>STRMAX){
+        fprintf(stderr, "Input path must not exceed 255 bytes.\n");
         exit(1);
     }
     if(Name_Check(argv[1]) < 0){
