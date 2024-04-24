@@ -36,12 +36,9 @@ extern char COMMITPATH[PATHMAX];
 extern char STAGPATH[PATHMAX];
 extern char FILEPATH[PATHMAX];
 extern char inputBuf[PATHMAX*4];
-extern char BUF[PATHMAX];
+extern char BUF[PATHMAX*2];
 
 extern char *COMMAND_SET[];
-
-//struct Node;
-//struct List;
 
 struct Node{
     int mode;
@@ -62,7 +59,7 @@ extern struct List *Q;
 
 void Get_Path();
 
-void List_Init();
+struct List * List_Init(struct List * Q);
 
 void Stag_Setting();
 
@@ -80,4 +77,7 @@ int Cmd_File_Switch(int command, struct Node *start);
 int Cmd_Recur_Switch(int command, struct Node *start);
 int Check_Status(struct Node *start, int command);
 
+
+char * Commit_Path(char * name, char * path);
+void Make_Commit(struct Node *start, char *name);
 #endif //REPO_HEADER_H

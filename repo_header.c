@@ -19,7 +19,7 @@ char COMMITPATH[PATHMAX];
 char STAGPATH[PATHMAX];
 char FILEPATH[PATHMAX];
 char inputBuf[PATHMAX*4];
-char BUF[PATHMAX];
+char BUF[PATHMAX*2];
 
 char *COMMAND_SET[] = {
         "add",
@@ -31,24 +31,9 @@ char *COMMAND_SET[] = {
         "help",
         "exit",
 };
-//
-//struct Node{
-//    int mode;
-//    int status;//status가 true 이면 mode 와 상관없이 child를 볼 필요가 있다. dir가 remove 된 후 안의 파일이 add 된 경우 status가 true가 된다.
-//    bool isdir;
-//    char realpath[PATHMAX];
-//    struct Node *next;
-//    struct Node *prev;
-//    struct Node *child;
-//    struct Node *parent;
-//};
-//
-//struct List{
-//    struct Node *head;
-//    struct Node *tail;
-//};
 
 struct List *Q;
+struct List *Commit_Q;
 //필요한 repo path들 가져오기
 void Get_Path(){
     getcwd(EXEPATH,PATHMAX);
@@ -105,7 +90,7 @@ int Read_Line(int fd, char *buf){
     return ret;
 }
 //list 초기화 세팅
-void List_Init(){
+struct List * List_Init(struct List * Q){
     Q = (struct List*)malloc(sizeof(struct List));
     Q->head = (struct Node*)malloc(sizeof(struct Node));
     Q->tail = (struct Node*)malloc(sizeof(struct Node));
@@ -119,6 +104,8 @@ void List_Init(){
     Q->tail->prev = Q->head;
     strcpy(Q->head->realpath, EXEPATH);
     Q->head->isdir = true;
+    Q->head->status = true;
+    return Q;
 }
 
 void Insert_Node(struct Node *curr, char *path){
@@ -173,7 +160,7 @@ void List_Setting(){
     struct dirent **namelist;
     char buf[PATHMAX*2];
 
-    List_Init();
+    Q = List_Init(Q);
 
     if ((cnt = scandir(EXEPATH, &namelist, NULL, alphasort)) == -1) {
         fprintf(stderr, "ERROR : scandir error for %s\n", EXEPATH);
@@ -243,6 +230,7 @@ int Cmd_Recur_Switch(int command, struct Node *start){
     }
     return ret;
 }
+//staging list 세팅
 void Stag_Setting(){
     int fd;
     int command;
@@ -261,7 +249,7 @@ void Stag_Setting(){
         }
     }
 }
-
+//add remove child와 parent 관계에 따른 예외 처리용
 int Check_Status(struct Node *start, int command){
     int ret = 0;
     struct Node *curr = start;
@@ -280,4 +268,60 @@ int Check_Status(struct Node *start, int command){
         return 0;
     }
     return ret;
+}
+//commit path로 변화
+char * Commit_Path(char * name, char * path){
+    sprintf(BUF, "%s/%s%s", REPOPATH, name, path+strlen(EXEPATH));
+    return BUF;
+}
+//커밋 파일만들고 내용 복사
+void File_Commit(char *realpath, char * commitpath){
+    struct stat statbuf;
+    int fd1, fd2;
+    int len;
+    char buf[PATHMAX];
+
+    if((fd1=open(realpath,O_RDONLY))<0){
+        fprintf(stderr, "commit error for %s\n", realpath);
+    }
+    if((fd2=open(commitpath,O_CREAT|O_RDWR))<0){
+        fprintf(stderr, "commit error for %s\n", commitpath);
+    }
+    if (fstat(fd1, &statbuf) < 0) {
+        fprintf(stderr, "stat error for %s\n", realpath);
+        exit(1);
+    }
+    while ((len = read(fd1, buf, statbuf.st_size)) > 0) {//내용 복사
+        if(write(fd2, buf, len) < 0){// 왜 루트권한으로 써지지...
+            fprintf(stderr, "write error for %s\n", commitpath);
+            exit(1);
+        }
+    }
+}
+void Make_Commit(struct Node *start, char *name){
+    struct Node * curr = start;
+    if(curr->isdir == true && (curr->status == true || curr->mode == ADD_CMD)){
+        if(curr->child != NULL) {
+            curr = curr->child;
+            while (1) {
+                Make_Commit(curr, name);
+                if (curr->prev != NULL) {
+                    curr = curr->prev;
+                } else break;
+            }
+        }
+    }
+    else if(curr->isdir == false && curr->mode == ADD_CMD){
+        strcpy(BUF, Commit_Path(name, curr->realpath));
+        for(size_t j=strlen(REPOPATH)+1;BUF[j]!=0;j++){// 디렉터리가 없으면 생성
+            if(BUF[j]=='/') {
+                BUF[j] = 0;
+                if(access(BUF,F_OK)){
+                    mkdir(BUF,0777);
+                }
+                BUF[j]='/';
+            }
+        }
+        File_Commit(curr->realpath, BUF);
+    }
 }
