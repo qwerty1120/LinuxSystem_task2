@@ -1,5 +1,7 @@
 #include "repo_header.h"
 
+#define HASH_MD5  33
+
 #define true 1
 #define false 0
 
@@ -33,7 +35,38 @@ char *COMMAND_SET[] = {
 };
 
 struct List *Q;
+
 struct List *Commit_Q;
+struct list *NEW, *MDF, *REM;
+
+//hashing
+int md5(char *target_path, char *hash_result) {
+    FILE *fp;
+    unsigned char hash[MD5_DIGEST_LENGTH];
+    unsigned char buffer[SHRT_MAX];
+    int bytes = 0;
+    MD5_CTX md5;
+
+    if ((fp = fopen(target_path, "rb")) == NULL) {
+        printf("ERROR: fopen error for %s\n", target_path);
+        return 1;
+    }
+
+    MD5_Init(&md5);
+
+    while ((bytes = fread(buffer, 1, SHRT_MAX, fp)) != 0)
+        MD5_Update(&md5, buffer, bytes);
+
+    MD5_Final(hash, &md5);
+
+    for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
+        sprintf(hash_result + (i * 2), "%02x", hash[i]);
+    hash_result[HASH_MD5 - 1] = 0;
+
+    fclose(fp);
+
+    return 0;
+}
 //필요한 repo path들 가져오기
 void Get_Path(){
     getcwd(EXEPATH,PATHMAX);
@@ -108,6 +141,15 @@ struct List * List_Init(struct List * Q){
     return Q;
 }
 
+struct list *Commit_Init(struct list * new){
+    new = (struct list *)malloc(sizeof(struct list));
+    new->head = (struct node*)malloc(sizeof(struct node));
+    new->tail = (struct node*)malloc(sizeof(struct node));
+    new->head->next = new->tail;
+    new->tail->prev = new->head;
+    new->tail->next = NULL;
+    return new;
+}
 void Insert_Node(struct Node *curr, char *path){
     struct Node * new = (struct Node *)malloc(sizeof(struct Node));
     strcpy(new->realpath, path);
@@ -271,7 +313,18 @@ int Check_Status(struct Node *start, int command){
 }
 //commit path로 변화
 char * Commit_Path(char * name, char * path){
-    sprintf(BUF, "%s/%s%s", REPOPATH, name, path+strlen(EXEPATH));
+    if(strncmp(path, REPOPATH, strlen(REPOPATH)) == 0){
+        int len = 0;
+        strcpy(BUF, path+strlen(REPOPATH)+1);
+        for(int i=0;i<strlen(BUF);i++){
+            if(BUF[i] == '/') {
+                len = i;
+                break;
+            }
+        }
+        sprintf(BUF, "%s%s", EXEPATH, path + strlen(REPOPATH) + 1 + len);
+    }
+    else sprintf(BUF, "%s/%s%s", REPOPATH, name, path+strlen(EXEPATH));
     return BUF;
 }
 //커밋 파일만들고 내용 복사
@@ -284,7 +337,7 @@ void File_Commit(char *realpath, char * commitpath){
     if((fd1=open(realpath,O_RDONLY))<0){
         fprintf(stderr, "commit error for %s\n", realpath);
     }
-    if((fd2=open(commitpath,O_CREAT|O_RDWR))<0){
+    if((fd2=open(commitpath,O_CREAT|O_RDWR, 0777))<0){
         fprintf(stderr, "commit error for %s\n", commitpath);
     }
     if (fstat(fd1, &statbuf) < 0) {
@@ -298,6 +351,98 @@ void File_Commit(char *realpath, char * commitpath){
         }
     }
 }
+
+int Compare_Hash(char * realpath, char * commitpath){
+    char realhash[PATHMAX], commithash[PATHMAX];
+    md5(realpath, realhash);
+    md5(commitpath, commithash);
+    return strcmp(commithash, realhash);
+}
+
+int MDF_Check(struct Node *start, char * path){//start 에 commit node 넣기
+    int ret = 0;
+    struct Node * curr = start;
+
+    if(curr->isdir == true){
+        if(curr->child != NULL) {
+            curr = curr->child;
+            while (1) {
+                ret += MDF_Check(curr, path);
+                if (curr->prev != NULL) {
+                    curr = curr->prev;
+                }
+                else break;
+            }
+        }
+    }
+    else if(curr->isdir == false && strcmp(path, Commit_Path(" ", curr->realpath)) == 0){
+        curr->mode = ADD_CMD;
+        if(Compare_Hash(path, curr->realpath) != 0){
+            struct node* new = (struct node *)malloc(sizeof(struct node));
+            strcpy(new->path, path);
+            MDF->tail->prev->next = new;
+            new->prev = MDF->tail->prev;
+            MDF->tail->prev = new;
+            new->next = MDF->tail;
+        }
+        return 1;
+    }
+    else if(!strcmp(STAGPATH, curr->realpath) || !strcmp(COMMITPATH, curr->realpath)){
+        curr->mode = ADD_CMD;
+    }
+    return ret;
+}
+
+void REM_Check(struct Node * start){
+    struct Node * curr = start;
+    if(curr->isdir == true){
+        if(curr->child != NULL) {
+            curr = curr->child;
+            while (1) {
+                REM_Check(curr);
+                if (curr->prev != NULL) {
+                    curr = curr->prev;
+                }
+                else break;
+            }
+        }
+    }
+    else if(curr->mode != ADD_CMD){
+        struct node* new = (struct node *)malloc(sizeof(struct node));
+        strcpy(new->path, curr->realpath);
+        REM->tail->prev->next = new;
+        new->prev = REM->tail->prev;
+        REM->tail->prev = new;
+        new->next = REM->tail;
+    }
+}
+
+void NEW_check(struct Node * start, struct Node * check){
+    struct Node * curr = start;
+    if(curr->isdir == true && (curr->status == true || curr->mode == ADD_CMD)){
+        if(curr->child != NULL) {
+            curr = curr->child;
+            while (1) {
+                NEW_check(curr, check);
+                if (curr->prev != NULL) {
+                    curr = curr->prev;
+                }
+                else break;
+            }
+        }
+    }
+    else if(curr->isdir == false && curr->mode == ADD_CMD){
+        if(MDF_Check(check, curr->realpath) == 0){
+            struct node* new = (struct node *)malloc(sizeof(struct node));
+            strcpy(new->path, curr->realpath);
+            NEW->tail->prev->next = new;
+            new->prev = NEW->tail->prev;
+            NEW->tail->prev = new;
+            new->next = NEW->tail;
+        }
+    }
+}
+
 void Make_Commit(struct Node *start, char *name){
     struct Node * curr = start;
     if(curr->isdir == true && (curr->status == true || curr->mode == ADD_CMD)){
@@ -323,5 +468,85 @@ void Make_Commit(struct Node *start, char *name){
             }
         }
         File_Commit(curr->realpath, BUF);
+    }
+}
+
+int Multiple_Check(char *name){
+    NEW = Commit_Init(NEW);
+    MDF = Commit_Init(MDF);
+    REM = Commit_Init(REM);
+
+    NEW_check(Q->head, Commit_Q->head->child);
+
+    REM_Check(Commit_Q->head->child);
+
+    if(NEW->head->next->next == NULL && MDF->head->next->next == NULL && REM->head->next->next == NULL){
+        return -1;
+    }
+    else {
+        Make_Commit(Q->head, name);
+    }
+}
+
+void Commit_Setting(){
+    int cnt;
+    struct dirent **namelist;
+    char buf[PATHMAX*2];
+
+    Commit_Q = List_Init(Commit_Q);
+
+    if ((cnt = scandir(REPOPATH, &namelist, NULL, alphasort)) == -1) {
+        fprintf(stderr, "ERROR : scandir error for %s\n", REPOPATH);
+        exit(1);
+    }
+    for (int i = 0; i < cnt; i++) {
+        if (!strcmp(namelist[i]->d_name, ".") || !strcmp(namelist[i]->d_name, ".."))
+            continue;
+        sprintf(buf, "%s/%s", REPOPATH, namelist[i]->d_name);
+        Insert_Recur(Commit_Q->head, buf);
+    }
+}
+
+int Name_Check(char * path){
+    struct Node * curr = Commit_Q->head->child;
+
+    while(true){
+        if(!strcmp(curr->realpath + strlen(REPOPATH)+1, path)){
+            return -1;
+        }
+        else if(curr->prev != NULL){
+            curr = curr->prev;
+        }
+        else break;
+    }
+    return 0;
+}
+
+void Print_Commit(char *name){
+    printf("commit to %s\n", name);
+    if(MDF->head->next->next != NULL){
+        struct node * curr = MDF->head->next;
+        printf(" modified: \n");
+        while(curr->next != NULL){
+            printf("   \".%s\"\n", curr->path+strlen(EXEPATH));
+            curr = curr->next;
+        }
+    }
+    if(REM->head->next->next != NULL){
+        struct node * curr = REM->head->next;
+        printf("%s\n", curr->path);
+        printf(" removed: \n");
+        while(curr->next != NULL){
+            printf("   \".%s\"\n", Commit_Path(" ", curr->path)+strlen(EXEPATH));
+            curr = curr->next;
+        }
+    }
+    if(NEW->head->next->next != NULL){
+        struct node * curr = NEW->head->next;
+        printf(" new file: \n");
+        while(curr->next != NULL){
+            printf("   \".%s\"\n", curr->path+strlen(EXEPATH));
+            curr = curr->next;
+        }
     }
 }

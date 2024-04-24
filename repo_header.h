@@ -1,3 +1,5 @@
+#define OPENSSL_API_COMPAT 0x10100000L
+
 #ifndef REPO_HEADER_H
 #define REPO_HEADER_H
 //#pragma once
@@ -9,7 +11,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
-//#include <openssl/md5>
+#include <openssl/md5.h>
 #include <errno.h>
 #include <dirent.h>
 #include <time.h>
@@ -40,6 +42,18 @@ extern char BUF[PATHMAX*2];
 
 extern char *COMMAND_SET[];
 
+struct node{
+    char path[PATHMAX];
+    struct node * next;
+    struct node * prev;
+};
+
+struct list{
+    struct node *head;
+    struct node *tail;
+};
+extern struct list *NEW, *MDF, *REM;
+
 struct Node{
     int mode;
     int status;//status가 true 이면 mode 와 상관없이 child를 볼 필요가 있다. dir가 remove 된 후 안의 파일이 add 된 경우 status가 true가 된다.
@@ -60,6 +74,7 @@ extern struct List *Q;
 void Get_Path();
 
 struct List * List_Init(struct List * Q);
+struct list *Commit_Init(struct list * new);
 
 void Stag_Setting();
 
@@ -77,7 +92,15 @@ int Cmd_File_Switch(int command, struct Node *start);
 int Cmd_Recur_Switch(int command, struct Node *start);
 int Check_Status(struct Node *start, int command);
 
-
+void Commit_Setting();
 char * Commit_Path(char * name, char * path);
 void Make_Commit(struct Node *start, char *name);
+int Name_Check(char * path);
+int Compare_Hash(char * realpath, char * commitpath);
+int MDF_Check(struct Node *start, char * path);
+void REM_Check(struct Node * start);
+void NEW_check(struct Node * start, struct Node * check);
+int Multiple_Check(char *name);
+
+void Print_Commit(char *name);
 #endif //REPO_HEADER_H
