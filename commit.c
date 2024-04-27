@@ -3,26 +3,29 @@
 int main(int argc, char *argv[]){
     Get_Path();
     Stag_Setting();
-    Commit_Setting();
 
     if(argc<2){
         printf("ERROR : <NAME> is not include\n");
-        printf("Usage : add <NAME> backup staging area with commit name.\n");
+        printf("Usage : commit <NAME>: backup staging area with commit name.\n");
         exit(1);
     }
-    if(strlen(argv[1])>STRMAX){
-        fprintf(stderr, "Input path must not exceed 255 bytes.\n");
+
+    int cnt;
+    struct stat stbuf;
+    struct dirent **namelist;
+    char buf[PATHMAX];
+
+    if ((cnt = scandir(".repo", &namelist, NULL, alphasort)) == -1) {
+        fprintf(stderr, "ERROR : scandir error for .repo\n");
         exit(1);
     }
-    if(Name_Check(argv[1]) < 0){
-        printf("%s is already exist in repo\n", argv[1]);
-        exit(1);
+    for (int i = 0; i < cnt; i++) {
+        if (!strcmp(namelist[i]->d_name, ".") || !strcmp(namelist[i]->d_name, ".."))
+            continue;
+        if(!strcmp(argv[1], namelist[i]->d_name)){
+            printf("\"%s\" commit is already exist in repo.\n", argv[1]);
+            exit(1);
+        }
     }
-    if(Multiple_Check(argv[1]) < 0){
-        printf("Nothing to commit\n");
-        exit(1);
-    }
-    else {
-        Print_Commit(argv[1]);
-    }
+    Commit(argv[1]);
 }

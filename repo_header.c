@@ -1,13 +1,16 @@
 #include "repo_header.h"
 
-#define HASH_MD5  33
-
 #define true 1
 #define false 0
+
+#define HASH_MD5  33
 
 #define UNTRACKED 0
 #define ADD_CMD 1
 #define REM_CMD 2
+
+#define STAG_MOD 1
+#define CMT_MOD 2
 
 #define PATHMAX 4096
 #define STRMAX 255
@@ -36,10 +39,13 @@ char *COMMAND_SET[] = {
 
 struct List *Q;
 
-struct List *Commit_Q;
-struct list *NEW, *MDF, *REM;
+struct list *NEW;
+struct list *MDF;
+struct list *REM;
+struct list *UNT;
 
-//hashing
+struct List *Commit_Q;
+
 int md5(char *target_path, char *hash_result) {
     FILE *fp;
     unsigned char hash[MD5_DIGEST_LENGTH];
@@ -62,7 +68,6 @@ int md5(char *target_path, char *hash_result) {
     for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
         sprintf(hash_result + (i * 2), "%02x", hash[i]);
     hash_result[HASH_MD5 - 1] = 0;
-
     fclose(fp);
 
     return 0;
@@ -99,28 +104,62 @@ char Read_One (int fd){
 }
 
 //한 줄을 읽어서 리스트에 추가 필요성 결정
-int Read_Line(int fd, char *buf){
+int Read_Line(int fd, char *buf, int mode){
     int ret = -1;
     int check;
-    if((check = Read_Delim(fd, buf, ' ')) == 0) {
-        return 0;
-    }
-    else if(check < 0){
-        fprintf(stderr, "read error for %s\n", STAGPATH);
-        exit(1);
-    }
+    if(mode == STAG_MOD) {
+        if ((check = Read_Delim(fd, buf, ' ')) == 0) {
+            return 0;
+        } else if (check < 0) {
+            fprintf(stderr, "read error for %s\n", STAGPATH);
+            exit(1);
+        }
 
-    if(!strcmp(buf, COMMAND_SET[0])){
-        ret = ADD_CMD;
+        if (!strcmp(buf, COMMAND_SET[0])) {
+            ret = ADD_CMD;
+        } else if (!strcmp(buf, COMMAND_SET[1])) {
+            ret = REM_CMD;
+        }
+        Read_One(fd);
+        Read_Delim(fd, buf, '\"');
+        Read_One(fd);
     }
-    else if(!strcmp(buf, COMMAND_SET[1])){
-        ret = REM_CMD;
+    else if(mode == CMT_MOD){
+        if ((check = Read_Delim(fd, buf, ' ')) == 0) {
+            return 0;
+        } else if (check < 0) {
+            fprintf(stderr, "read error for %s\n", COMMITPATH);
+            exit(1);
+        }
+        ret = 1;
+        Read_One(fd);
+        Read_Delim(fd, buf, '\"');//commit name
+        Read_One(fd);
+        Read_Delim(fd, inputBuf, ' ');
+        Read_Delim(fd, inputBuf, ':');//command
+        if(strcmp(inputBuf, "removed") != 0){
+            Read_Delim(fd, inputBuf, '\"');
+            Read_Delim(fd, inputBuf, '\"');//realpath
+        }
+        Read_One(fd);
     }
-    Read_One(fd);
-    Read_Delim(fd, buf, '\"');
-    Read_One(fd);
-
     return ret;
+}
+struct list * node_Init(struct list *new){
+    new = (struct list*)malloc(sizeof(struct list));
+    new->head = (struct node*)malloc(sizeof(struct node));
+    new->tail = (struct node*)malloc(sizeof(struct node));
+    new->head = new->tail;
+    new->tail->prev = new->head;
+    new->head->next=new->tail;
+    new->tail->next = NULL;
+    return new;
+}
+void Status_Init(){
+    NEW = node_Init(NEW);
+    MDF = node_Init(MDF);
+    REM = node_Init(REM);
+    UNT = node_Init(UNT);
 }
 //list 초기화 세팅
 struct List * List_Init(struct List * Q){
@@ -141,19 +180,10 @@ struct List * List_Init(struct List * Q){
     return Q;
 }
 
-struct list *Commit_Init(struct list * new){
-    new = (struct list *)malloc(sizeof(struct list));
-    new->head = (struct node*)malloc(sizeof(struct node));
-    new->tail = (struct node*)malloc(sizeof(struct node));
-    new->head->next = new->tail;
-    new->tail->prev = new->head;
-    new->tail->next = NULL;
-    return new;
-}
 void Insert_Node(struct Node *curr, char *path){
     struct Node * new = (struct Node *)malloc(sizeof(struct Node));
     strcpy(new->realpath, path);
-
+    new->mode = UNTRACKED;
     if(curr->child != NULL){
         new->parent = curr;
         curr->child->next = new;
@@ -227,8 +257,8 @@ struct Node * Find_Node(char *path, struct Node* start){
                 curr = curr->prev;
             }
             else {
-                printf("listing error\n");
-                exit(1);
+                Insert_Node(curr->parent, path);
+                return curr->parent->child;
             }
         }
         else if(!strcmp(path, curr->realpath)){
@@ -284,11 +314,23 @@ void Stag_Setting(){
         exit(1);
     }
 
-    while((command = Read_Line(fd, BUF)) > 0){
+    while((command = Read_Line(fd, BUF, STAG_MOD)) > 0){
         if(Cmd_Recur_Switch(command, Find_Node(BUF, Q->head)) < 0){
             printf("staging log error\n");
             exit(1);
         }
+    }
+
+    if((fd=open(COMMITPATH, O_RDONLY)) < 0){
+        fprintf(stderr, "open error for %s\n", COMMITPATH);
+        exit(1);
+    }
+
+    while((command = Read_Line(fd, BUF, CMT_MOD)) > 0){
+        if(strcmp(inputBuf, "removed") != 0 ) {
+            strcpy(Find_Node(inputBuf, Q->head)->backupname, BUF);
+        }
+        else continue;
     }
 }
 //add remove child와 parent 관계에 따른 예외 처리용
@@ -313,18 +355,7 @@ int Check_Status(struct Node *start, int command){
 }
 //commit path로 변화
 char * Commit_Path(char * name, char * path){
-    if(strncmp(path, REPOPATH, strlen(REPOPATH)) == 0){
-        int len = 0;
-        strcpy(BUF, path+strlen(REPOPATH)+1);
-        for(int i=0;i<strlen(BUF);i++){
-            if(BUF[i] == '/') {
-                len = i;
-                break;
-            }
-        }
-        sprintf(BUF, "%s%s", EXEPATH, path + strlen(REPOPATH) + 1 + len);
-    }
-    else sprintf(BUF, "%s/%s%s", REPOPATH, name, path+strlen(EXEPATH));
+    sprintf(BUF, "%s/%s%s", REPOPATH, name, path+strlen(EXEPATH));
     return BUF;
 }
 //커밋 파일만들고 내용 복사
@@ -332,7 +363,7 @@ void File_Commit(char *realpath, char * commitpath){
     struct stat statbuf;
     int fd1, fd2;
     int len;
-    char buf[PATHMAX];
+    char buf[PATHMAX*4];
 
     if((fd1=open(realpath,O_RDONLY))<0){
         fprintf(stderr, "commit error for %s\n", realpath);
@@ -351,98 +382,6 @@ void File_Commit(char *realpath, char * commitpath){
         }
     }
 }
-
-int Compare_Hash(char * realpath, char * commitpath){
-    char realhash[PATHMAX], commithash[PATHMAX];
-    md5(realpath, realhash);
-    md5(commitpath, commithash);
-    return strcmp(commithash, realhash);
-}
-
-int MDF_Check(struct Node *start, char * path){//start 에 commit node 넣기
-    int ret = 0;
-    struct Node * curr = start;
-
-    if(curr->isdir == true){
-        if(curr->child != NULL) {
-            curr = curr->child;
-            while (1) {
-                ret += MDF_Check(curr, path);
-                if (curr->prev != NULL) {
-                    curr = curr->prev;
-                }
-                else break;
-            }
-        }
-    }
-    else if(curr->isdir == false && strcmp(path, Commit_Path(" ", curr->realpath)) == 0){
-        curr->mode = ADD_CMD;
-        if(Compare_Hash(path, curr->realpath) != 0){
-            struct node* new = (struct node *)malloc(sizeof(struct node));
-            strcpy(new->path, path);
-            MDF->tail->prev->next = new;
-            new->prev = MDF->tail->prev;
-            MDF->tail->prev = new;
-            new->next = MDF->tail;
-        }
-        return 1;
-    }
-    else if(!strcmp(STAGPATH, curr->realpath) || !strcmp(COMMITPATH, curr->realpath)){
-        curr->mode = ADD_CMD;
-    }
-    return ret;
-}
-
-void REM_Check(struct Node * start){
-    struct Node * curr = start;
-    if(curr->isdir == true){
-        if(curr->child != NULL) {
-            curr = curr->child;
-            while (1) {
-                REM_Check(curr);
-                if (curr->prev != NULL) {
-                    curr = curr->prev;
-                }
-                else break;
-            }
-        }
-    }
-    else if(curr->mode != ADD_CMD){
-        struct node* new = (struct node *)malloc(sizeof(struct node));
-        strcpy(new->path, curr->realpath);
-        REM->tail->prev->next = new;
-        new->prev = REM->tail->prev;
-        REM->tail->prev = new;
-        new->next = REM->tail;
-    }
-}
-
-void NEW_check(struct Node * start, struct Node * check){
-    struct Node * curr = start;
-    if(curr->isdir == true && (curr->status == true || curr->mode == ADD_CMD)){
-        if(curr->child != NULL) {
-            curr = curr->child;
-            while (1) {
-                NEW_check(curr, check);
-                if (curr->prev != NULL) {
-                    curr = curr->prev;
-                }
-                else break;
-            }
-        }
-    }
-    else if(curr->isdir == false && curr->mode == ADD_CMD){
-        if(MDF_Check(check, curr->realpath) == 0){
-            struct node* new = (struct node *)malloc(sizeof(struct node));
-            strcpy(new->path, curr->realpath);
-            NEW->tail->prev->next = new;
-            new->prev = NEW->tail->prev;
-            NEW->tail->prev = new;
-            new->next = NEW->tail;
-        }
-    }
-}
-
 void Make_Commit(struct Node *start, char *name){
     struct Node * curr = start;
     if(curr->isdir == true && (curr->status == true || curr->mode == ADD_CMD)){
@@ -457,96 +396,191 @@ void Make_Commit(struct Node *start, char *name){
         }
     }
     else if(curr->isdir == false && curr->mode == ADD_CMD){
-        strcpy(BUF, Commit_Path(name, curr->realpath));
-        for(size_t j=strlen(REPOPATH)+1;BUF[j]!=0;j++){// 디렉터리가 없으면 생성
-            if(BUF[j]=='/') {
-                BUF[j] = 0;
-                if(access(BUF,F_OK)){
-                    mkdir(BUF,0777);
+        if(!access(curr->realpath, F_OK)) {
+            strcpy(BUF, Commit_Path(name, curr->realpath));
+            for (size_t j = strlen(REPOPATH) + 1; BUF[j] != 0; j++) {// 디렉터리가 없으면 생성
+                if (BUF[j] == '/') {
+                    BUF[j] = 0;
+                    if (access(BUF, F_OK)) {
+                        mkdir(BUF, 0777);
+                    }
+                    BUF[j] = '/';
                 }
-                BUF[j]='/';
+            }
+            File_Commit(curr->realpath, BUF);
+        }
+    }
+}
+
+void File_Status(struct Node *file){
+    struct node * new = (struct node*)malloc(sizeof(struct node));
+    strcpy(new->path, file->realpath);
+    if(file->mode == UNTRACKED){
+        UNT->tail->next = new;
+        new->prev = UNT->tail;
+        UNT->tail = UNT->tail->next;
+        UNT->tail->next = NULL;
+    }
+    else if(file->mode == ADD_CMD){
+        if(access(file->realpath, F_OK)) {
+            printf("%s\n", file->realpath);
+            REM->tail->next = new;
+            new->prev = REM->tail;
+            REM->tail = REM->tail->next;
+            REM->tail->next = NULL;
+        }
+        else {
+            if(!strcmp(file->backupname, "")){
+                NEW->tail->next = new;
+                new->prev = NEW->tail;
+                NEW->tail = NEW->tail->next;
+                NEW->tail->next = NULL;
+            }
+            else {
+                md5(Commit_Path(file->backupname, file->realpath), inputBuf);
+                md5(file->realpath, BUF);
+                if(strncmp(BUF, inputBuf, MD5_DIGEST_LENGTH) != 0){
+                    MDF->tail->next = new;
+                    new->prev = MDF->tail;
+                    MDF->tail = MDF->tail->next;
+                    MDF->tail->next = NULL;
+                }
             }
         }
-        File_Commit(curr->realpath, BUF);
+    }
+}
+void Status_Check(struct Node *start){
+    struct Node * curr = start;
+    if(curr->isdir == true){
+        if(curr->child != NULL) {
+            curr = curr->child;
+            while (1) {
+                if(curr->isdir == false && curr->mode != REM_CMD){
+                    File_Status(curr);
+                }
+                if (curr->prev != NULL) {
+                    curr = curr->prev;
+                } else break;
+            }
+            curr = start->child;
+            while(1){
+                if(curr->isdir == true){
+                    Status_Check(curr);
+                }
+                if (curr->prev != NULL) {
+                    curr = curr->prev;
+                } else break;
+            }
+        }
     }
 }
 
-int Multiple_Check(char *name){
-    NEW = Commit_Init(NEW);
-    MDF = Commit_Init(MDF);
-    REM = Commit_Init(REM);
-
-    NEW_check(Q->head, Commit_Q->head->child);
-
-    REM_Check(Commit_Q->head->child);
-
-    if(NEW->head->next->next == NULL && MDF->head->next->next == NULL && REM->head->next->next == NULL){
-        return -1;
+void Print_Status(){
+    Status_Init();
+    Status_Check(Q->head);
+    if(NEW->head->next != NULL || MDF->head->next != NULL || REM->head->next != NULL){
+        printf("Changes to be committed: \n");
+        if(MDF->head->next != NULL){
+            struct node *curr = MDF->head->next;
+            printf("  Modified: \n");
+            while(1){
+                printf("\t\".%s\"\n", curr->path + strlen(EXEPATH));
+                if(curr->next == NULL) break;
+                curr=curr->next;
+            }
+            free(curr);
+            printf("\n");
+        }
+        if(REM->head->next != NULL){
+            struct node *curr = REM->head->next;
+            printf("  Removed: \n");
+            while(1){
+                printf("\t\".%s\"\n", curr->path + strlen(EXEPATH));
+                if(curr->next == NULL) break;
+                curr=curr->next;
+            }
+            free(curr);
+            printf("\n");
+        }
+        if(NEW->head->next != NULL){
+            struct node *curr = NEW->head->next;
+            printf("  New file: \n");
+            while(1){
+                printf("\t\".%s\"\n", curr->path + strlen(EXEPATH));
+                if(curr->next == NULL) break;
+                curr=curr->next;
+            }
+            free(curr);
+            printf("\n");
+        }
     }
-    else {
-        Make_Commit(Q->head, name);
+    else {printf("Nothing to commit\n");}
+    if(UNT->head->next != NULL){
+        printf("Untraked files: \n");
+        struct node *curr = UNT->head->next;
+        printf("  New file: \n");
+        while(1){
+            printf("\t\".%s\"\n", curr->path + strlen(EXEPATH));
+            if(curr->next == NULL) break;
+            curr=curr->next;
+        }
+        free(curr);
+        printf("\n");
     }
 }
+void Print_Commit(char *name){
+    int fd;
 
-void Commit_Setting(){
-    int cnt;
-    struct dirent **namelist;
-    char buf[PATHMAX*2];
-
-    Commit_Q = List_Init(Commit_Q);
-
-    if ((cnt = scandir(REPOPATH, &namelist, NULL, alphasort)) == -1) {
-        fprintf(stderr, "ERROR : scandir error for %s\n", REPOPATH);
+    if((fd=open(COMMITPATH, O_RDWR|O_APPEND)) < 0){
+        fprintf(stderr, "open error for %s\n", COMMITPATH);
         exit(1);
     }
-    for (int i = 0; i < cnt; i++) {
-        if (!strcmp(namelist[i]->d_name, ".") || !strcmp(namelist[i]->d_name, ".."))
-            continue;
-        sprintf(buf, "%s/%s", REPOPATH, namelist[i]->d_name);
-        Insert_Recur(Commit_Q->head, buf);
+    printf("commit to \"%s\"\n", name);
+    if(MDF->head->next != NULL){
+        struct node *curr = MDF->head->next;
+        while(1){
+            printf("\tmodified: \".%s\"\n", curr->path + strlen(EXEPATH));
+            sprintf(BUF, "commit: \"%s\" - modified: \"%s\"\n", name, curr->path);
+            write(fd, BUF, strlen(BUF));
+            if(curr->next == NULL) break;
+            curr=curr->next;
+        }
+        free(curr);
+        printf("\n");
+    }
+    if(REM->head->next != NULL){
+        struct node *curr = REM->head->next;
+        while(1){
+            printf("\tremoved: \".%s\"\n", curr->path + strlen(EXEPATH));
+            sprintf(BUF, "commit: \"%s\" - removed: \"%s\"\n", name, curr->path);
+            write(fd, BUF, strlen(BUF));
+            if(curr->next == NULL) break;
+            curr=curr->next;
+        }
+        free(curr);
+        printf("\n");
+    }
+    if(NEW->head->next != NULL){
+        struct node *curr = NEW->head->next;
+        while(1){
+            printf("\tnew file: \".%s\"\n", curr->path + strlen(EXEPATH));
+            sprintf(BUF, "commit: \"%s\" - new file: \"%s\"\n", name, curr->path);
+            write(fd, BUF, strlen(BUF));
+            if(curr->next == NULL) break;
+            curr=curr->next;
+        }
+        free(curr);
+        printf("\n");
     }
 }
-
-int Name_Check(char * path){
-    struct Node * curr = Commit_Q->head->child;
-
-    while(true){
-        if(!strcmp(curr->realpath + strlen(REPOPATH)+1, path)){
-            return -1;
-        }
-        else if(curr->prev != NULL){
-            curr = curr->prev;
-        }
-        else break;
+void Commit(char *name){
+    Status_Init();
+    Status_Check(Q->head);
+    if(NEW->head->next != NULL || MDF->head->next != NULL || REM->head->next != NULL){
+        Print_Commit(name);
+        Make_Commit(Q->head, name);
     }
-    return 0;
-}
-
-void Print_Commit(char *name){
-    printf("commit to %s\n", name);
-    if(MDF->head->next->next != NULL){
-        struct node * curr = MDF->head->next;
-        printf(" modified: \n");
-        while(curr->next != NULL){
-            printf("   \".%s\"\n", curr->path+strlen(EXEPATH));
-            curr = curr->next;
-        }
-    }
-    if(REM->head->next->next != NULL){
-        struct node * curr = REM->head->next;
-        printf("%s\n", curr->path);
-        printf(" removed: \n");
-        while(curr->next != NULL){
-            printf("   \".%s\"\n", Commit_Path(" ", curr->path)+strlen(EXEPATH));
-            curr = curr->next;
-        }
-    }
-    if(NEW->head->next->next != NULL){
-        struct node * curr = NEW->head->next;
-        printf(" new file: \n");
-        while(curr->next != NULL){
-            printf("   \".%s\"\n", curr->path+strlen(EXEPATH));
-            curr = curr->next;
-        }
+    else {
+        printf("Nothing to commit\n");
     }
 }
