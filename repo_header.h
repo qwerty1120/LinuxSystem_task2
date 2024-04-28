@@ -39,6 +39,7 @@ extern char STAGPATH[PATHMAX];
 extern char FILEPATH[PATHMAX];
 extern char inputBuf[PATHMAX*4];
 extern char BUF[PATHMAX*2];
+extern char BUF1[PATHMAX*2];
 
 extern char *COMMAND_SET[];
 
@@ -110,4 +111,6 @@ void Commit(char *name);
 void File_Status(struct Node *file);
 void Status_Check(struct Node *start);
 void Print_Status();
+
+void Print_Log(char *name);
 #endif //REPO_HEADER_H

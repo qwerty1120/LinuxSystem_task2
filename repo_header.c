@@ -11,6 +11,7 @@
 
 #define STAG_MOD 1
 #define CMT_MOD 2
+#define LOG_MOD 3
 
 #define PATHMAX 4096
 #define STRMAX 255
@@ -25,6 +26,7 @@ char STAGPATH[PATHMAX];
 char FILEPATH[PATHMAX];
 char inputBuf[PATHMAX*4];
 char BUF[PATHMAX*2];
+char BUF1[PATHMAX*2];
 
 char *COMMAND_SET[] = {
         "add",
@@ -124,7 +126,7 @@ int Read_Line(int fd, char *buf, int mode){
         Read_Delim(fd, buf, '\"');
         Read_One(fd);
     }
-    else if(mode == CMT_MOD){
+    else if(mode == CMT_MOD || mode == LOG_MOD){
         if ((check = Read_Delim(fd, buf, ' ')) == 0) {
             return 0;
         } else if (check < 0) {
@@ -133,10 +135,12 @@ int Read_Line(int fd, char *buf, int mode){
         }
         ret = 1;
         Read_One(fd);
+
         Read_Delim(fd, buf, '\"');//commit name
         Read_One(fd);
         Read_Delim(fd, inputBuf, ' ');
         Read_Delim(fd, inputBuf, ':');//command
+        if(mode == LOG_MOD) strcpy(BUF1, inputBuf);
         if(strcmp(inputBuf, "removed") != 0){
             Read_Delim(fd, inputBuf, '\"');
             Read_Delim(fd, inputBuf, '\"');//realpath
@@ -582,5 +586,33 @@ void Commit(char *name){
     }
     else {
         printf("Nothing to commit\n");
+    }
+}
+
+void Print_Log(char *name){
+    int fd;
+    int command = 0, cnt;
+    char backupname[STRMAX]={0};
+
+    if((fd=open(COMMITPATH, O_RDONLY)) < 0){
+        fprintf(stderr, "open error for %s\n", COMMITPATH);
+        exit(1);
+    }
+
+    if(strcmp(name, "") != 0){
+        strcpy(backupname, name);
+        printf("commit: \"%s\"\n", name);
+        command = true;
+    }
+
+    while((cnt = Read_Line(fd, BUF, LOG_MOD)) > 0){
+        if(!strcmp(backupname, BUF)){
+            printf("\t- %s: \"%s\"\n", BUF1, inputBuf);
+        }
+        else if(!command){
+            printf("commit: \"%s\"\n", BUF);
+            strcpy(backupname, BUF);
+            printf("\t- %s: \"%s\"\n", BUF1, inputBuf);
+        }
     }
 }
